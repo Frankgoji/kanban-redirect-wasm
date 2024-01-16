@@ -1,0 +1,25 @@
+{
+  "name": "tumblr-kanban-rust",
+  "version": "1.0.0",
+  "description": "Host Wasm for Tumblr Kanban",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "webpack && cp app/*.css build",
+    "debug_build": "webpack --env debug && cp app/*.css build"
+  },
+  "author": "flee",
+  "license": "ISC",
+  "dependencies": {
+    "node-html-parser": "^1.1.15",
+    "react": "^16.8.6",
+    "react-dom": "^16.8.6"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.2.46",
+    "regenerator-runtime": "^0.13.7",
+    "swc-loader": "^0.1.12",
+    "webpack": "^5.0.0",
+    "webpack-cli": "^4.1.0"
+  }
+}

@@ -1,0 +1,5 @@
+/target
+/pkg
+react/app/tumblr_kanban_rust*
+react/build
+react/node_modules
