@@ -1,10 +1,10 @@
-use base64::prelude::*;
+use base64::{Engine, prelude::BASE64_STANDARD};
 use chrono::Utc;
 use chrono_tz::US::Pacific;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsValue, JsCast, prelude::wasm_bindgen};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{FormData, RequestInit, Response, UrlSearchParams};
 
