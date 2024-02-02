@@ -4,7 +4,7 @@ use chrono_tz::US::Pacific;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use wasm_bindgen::{JsValue, JsCast, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast, JsError, prelude::wasm_bindgen};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{FormData, RequestInit, Response, UrlSearchParams};
 
@@ -41,31 +41,31 @@ extern {
 
 /// Handles redirect URL, parses state, calls appropriate handler
 #[wasm_bindgen]
-pub async fn handle_redirect() -> Result<(), JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
-    let document = window.document().expect("should have a document on window");
-    let location = document.location().expect("couldn't get document.location");
-    let search = location.search()?;
-    let href = location.href()?;
+pub async fn handle_redirect() -> Result<(), JsError> {
+    let window = web_sys::window().ok_or_else(|| JsError::new("no global `window` exists"))?;
+    let document = window.document().ok_or_else(|| JsError::new("should have a document on window"))?;
+    let location = document.location().ok_or_else(|| JsError::new("couldn't get document.location"))?;
+    let search = location.search().or_else(|_| Err(JsError::new("failed to get query vars")))?;
+    let href = location.href().or_else(|_| Err(JsError::new("failed to get href")))?;
     log(&format!("href: {href}"));
 
-    let url_search = UrlSearchParams::new_with_str(&search)?;
+    let url_search = UrlSearchParams::new_with_str(&search).or_else(|_| Err(JsError::new("couldn't get params")))?;
     let Some(code) = url_search.get("code") else {
-        log(&format!("couldn't get code: {href}"));
-        panic!("couldn't get code: {href}");
+        let msg = format!("couldn't get code: {href}");
+        return Err(JsError::new(&msg));
     };
     let Some(state) = url_search.get("state") else {
-        log(&format!("couldn't get state: {href}"));
-        panic!("couldn't get state: {href}");
+        let msg = format!("couldn't get state: {href}");
+        return Err(JsError::new(&msg));
     };
     log(&format!("code: {code}"));
     log(&format!("state: {state}"));
 
-    let decoded = BASE64_STANDARD.decode(state.as_bytes()).expect("couldn't decode state");
-    let decoded = String::from_utf8(decoded).expect("decoded state not valid utf-8");
+    let decoded = BASE64_STANDARD.decode(state.as_bytes())?;
+    let decoded = String::from_utf8(decoded)?;
     log(&format!("decoded state: {decoded}"));
 
-    let state: State = serde_json::from_str(&decoded).expect("state invalid");
+    let state: State = serde_json::from_str(&decoded)?;
     let State { op, value } = state;
 
     match op {
@@ -75,7 +75,7 @@ pub async fn handle_redirect() -> Result<(), JsValue> {
 }
 
 /// Takes the state (token + postID) and finishes adding the tags
-async fn add_done_tag(code: String, post_id: String) -> Result<(), JsValue> {
+async fn add_done_tag(code: String, post_id: String) -> Result<(), JsError> {
     let token = get_token(code).await?;
     log(&format!("token: {token}"));
 
@@ -90,42 +90,47 @@ async fn add_done_tag(code: String, post_id: String) -> Result<(), JsValue> {
     let response = client.get(&post_url)
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .send()
-        .await
-        .unwrap();
-    log(&format!("Status: {:?}", response.status()));
-    let json: Value = response.json().await.unwrap();
-    log(&format!("Original post: {}", serde_json::to_string_pretty(&json).unwrap()));
+        .await?;
+    if !response.status().is_success() {
+        let msg = format!("request failed, status: {:?}", response.status());
+        return Err(JsError::new(&msg));
+    }
+    let json: Value = response.json().await?;
+    log(&format!("Original post: {}", serde_json::to_string_pretty(&json)?));
 
     let new_json: Value = json!({
         "content": json["response"]["content"],
         "tags": tags
     });
-    log(&format!("Post Body: {}", serde_json::to_string_pretty(&new_json).unwrap()));
+    log(&format!("Post Body: {}", serde_json::to_string_pretty(&new_json)?));
     let response = client.put(&post_url)
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .header(CONTENT_TYPE, "application/json")
-        .body(serde_json::to_string(&new_json).unwrap())
+        .body(serde_json::to_string(&new_json)?)
         .send()
-        .await
-        .unwrap();
-    log(&format!("Status: {:?}", response.status()));
-    let json: Value = response.json().await.unwrap();
-    log(&format!("{}", serde_json::to_string_pretty(&json).unwrap()));
+        .await?;
+    if !response.status().is_success() {
+        let msg = format!("request failed, status: {:?}", response.status());
+        return Err(JsError::new(&msg));
+    }
+    let json: Value = response.json().await?;
+    log(&format!("{}", serde_json::to_string_pretty(&json)?));
 
-    let window = web_sys::window().expect("no global `window` exists");
-    let document = window.document().expect("should have a document on window");
-    let location = document.location().expect("couldn't get document.location");
-    location.set_href(&format!("https://frankgojikanban.tumblr.com/post/{post_id}")).unwrap();
+    let window = web_sys::window().ok_or_else(|| JsError::new("no global `window` exists"))?;
+    let document = window.document().ok_or_else(|| JsError::new("should have a document on window"))?;
+    let location = document.location().ok_or_else(|| JsError::new("couldn't get document.location"))?;
+    location.set_href(&format!("https://frankgojikanban.tumblr.com/post/{post_id}"))
+        .or_else(|_| Err(JsError::new("failed to set the location")))?;
 
     Ok(())
 }
 
 /// Takes the state (token + month) and finishes clearing posts
-async fn clear_done_tags(code: String, month: String) -> Result<(), JsValue> {
+async fn clear_done_tags(code: String, month: String) -> Result<(), JsError> {
     let token = get_token(code).await?;
     log(&format!("token: {token}"));
     let months = vec!["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let month = month.parse::<usize>().unwrap() - 1;
+    let month = month.parse::<usize>()? - 1;
     let month = months[month];
 
     let client = reqwest::Client::new();
@@ -133,62 +138,70 @@ async fn clear_done_tags(code: String, month: String) -> Result<(), JsValue> {
     let response = client.get(&posts_url)
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .send()
-        .await
-        .unwrap();
-    log(&format!("Status: {:?}", response.status()));
-    let json: Value = response.json().await.unwrap();
-    log(&format!("{}", serde_json::to_string_pretty(&json).unwrap()));
+        .await?;
+    if !response.status().is_success() {
+        let msg = format!("request failed, status: {:?}", response.status());
+        return Err(JsError::new(&msg));
+    }
+    let json: Value = response.json().await?;
+    log(&format!("{}", serde_json::to_string_pretty(&json)?));
 
     // total_posts is the number of posts, report it
     alert(&format!("Number of Done posts in {month}: {}", json["response"]["total_posts"]));
 
     // iterate through each post and clear the tags
-    for post in json["response"]["posts"].as_array().unwrap() {
+    let posts = json["response"]["posts"].as_array().ok_or_else(|| JsError::new("failed to convert posts to array"))?;
+    for post in posts {
         let new_json: Value = json!({
             "content": post["content"],
-            "tags": []
+            "tags": ""
         });
-        log(&format!("Post Body: {}", serde_json::to_string_pretty(&new_json).unwrap()));
+        log(&format!("Post Body: {}", serde_json::to_string_pretty(&new_json)?));
         let post_id = &post["id"];
         let post_url = format!("https://api.tumblr.com/v2/blog/frankgojikanban/posts/{post_id}");
         let response = client.put(&post_url)
             .header(AUTHORIZATION, format!("Bearer {token}"))
             .header(CONTENT_TYPE, "application/json")
-            .body(serde_json::to_string(&new_json).unwrap())
+            .body(serde_json::to_string(&new_json)?)
             .send()
-            .await
-            .unwrap();
-        log(&format!("Status: {:?}", response.status()));
-        let json: Value = response.json().await.unwrap();
-        log(&format!("{}", serde_json::to_string_pretty(&json).unwrap()));
+            .await?;
+        if !response.status().is_success() {
+            let msg = format!("request failed, status: {:?}", response.status());
+            return Err(JsError::new(&msg));
+        }
+        let json: Value = response.json().await?;
+        log(&format!("{}", serde_json::to_string_pretty(&json)?));
     }
 
-    let window = web_sys::window().expect("no global `window` exists");
-    let document = window.document().expect("should have a document on window");
-    let location = document.location().expect("couldn't get document.location");
-    location.set_href("https://frankgojikanban.tumblr.com/tagged/done").unwrap();
+    let window = web_sys::window().ok_or_else(|| JsError::new("no global `window` exists"))?;
+    let document = window.document().ok_or_else(|| JsError::new("should have a document on window"))?;
+    let location = document.location().ok_or_else(|| JsError::new("couldn't get document.location"))?;
+    location.set_href("https://frankgojikanban.tumblr.com/tagged/done")
+        .or_else(|_| Err(JsError::new("failed to set the location")))?;
 
     Ok(())
 }
 
 /// Can't use reqwest here due to multipart sending binary rather than text.
-async fn get_token(code: String) -> Result<String, JsValue> {
+async fn get_token(code: String) -> Result<String, JsError> {
     let api_key = "YOUR_API_KEY";
     let secret_key = "YOUR_SECRET_KEY";
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = web_sys::window().ok_or_else(|| JsError::new("no global `window` exists"))?;
 
-    let form_data = FormData::new()?;
-    form_data.set_with_str("grant_type", "authorization_code")?;
-    form_data.set_with_str("code", &code)?;
-    form_data.set_with_str("client_id", api_key)?;
-    form_data.set_with_str("client_secret", secret_key)?;
+    let form_data = FormData::new().or_else(|_| Err(JsError::new("couldn't create form data")))?;
+    form_data.set_with_str("grant_type", "authorization_code").or_else(|_| Err(JsError::new("couldn't set form data")))?;
+    form_data.set_with_str("code", &code).or_else(|_| Err(JsError::new("couldn't set form data")))?;
+    form_data.set_with_str("client_id", api_key).or_else(|_| Err(JsError::new("couldn't set form data")))?;
+    form_data.set_with_str("client_secret", secret_key).or_else(|_| Err(JsError::new("couldn't set form data")))?;
 
     let mut request_init = RequestInit::new();
     request_init.method("POST")
         .body(Some(&form_data));
-    let resp = JsFuture::from(window.fetch_with_str_and_init("https://api.tumblr.com/v2/oauth2/token", &request_init)).await?;
-    let resp: Response = resp.dyn_into().unwrap();
-    let json = JsFuture::from(resp.json()?).await?;
+    let resp = JsFuture::from(window.fetch_with_str_and_init("https://api.tumblr.com/v2/oauth2/token", &request_init)).await
+        .or_else(|_| Err(JsError::new("failed to post to token")))?;
+    let resp: Response = resp.dyn_into().or_else(|_| Err(JsError::new("failed to get response")))?;
+    let json = JsFuture::from(resp.json().or_else(|_| Err(JsError::new("couldn't get response json")))?).await
+        .or_else(|_| Err(JsError::new("couldn't get response json")))?;
     log(&format!("response: {:?}", json));
 
     let TokenResponse { access_token, .. } = serde_wasm_bindgen::from_value(json)?;
