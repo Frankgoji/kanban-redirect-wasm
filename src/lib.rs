@@ -134,35 +134,13 @@ async fn clear_done_tags(code: String, month: String) -> Result<(), JsError> {
     let month = months[month];
 
     let client = reqwest::Client::new();
-    let posts_url = format!("https://api.tumblr.com/v2/blog/frankgojikanban/posts?tag[0]=done&tag[1]={month}&npf=true");
-    let response = client.get(&posts_url)
-        .header(AUTHORIZATION, format!("Bearer {token}"))
-        .send()
-        .await?;
-    if !response.status().is_success() {
-        let msg = format!("request failed, status: {:?}", response.status());
-        return Err(JsError::new(&msg));
-    }
-    let json: Value = response.json().await?;
-    log(&format!("{}", serde_json::to_string_pretty(&json)?));
+    let mut total = 1;
 
-    // total_posts is the number of posts, report it
-    alert(&format!("Number of Done posts in {month}: {}", json["response"]["total_posts"]));
-
-    // iterate through each post and clear the tags
-    let posts = json["response"]["posts"].as_array().ok_or_else(|| JsError::new("failed to convert posts to array"))?;
-    for post in posts {
-        let new_json: Value = json!({
-            "content": post["content"],
-            "tags": ""
-        });
-        log(&format!("Post Body: {}", serde_json::to_string_pretty(&new_json)?));
-        let post_id = &post["id"];
-        let post_url = format!("https://api.tumblr.com/v2/blog/frankgojikanban/posts/{post_id}");
-        let response = client.put(&post_url)
+    // since the limit per request is 20 posts, iterate after clearing this set
+    while total > 0 {
+        let posts_url = format!("https://api.tumblr.com/v2/blog/frankgojikanban/posts?tag[0]=done&tag[1]={month}&npf=true");
+        let response = client.get(&posts_url)
             .header(AUTHORIZATION, format!("Bearer {token}"))
-            .header(CONTENT_TYPE, "application/json")
-            .body(serde_json::to_string(&new_json)?)
             .send()
             .await?;
         if !response.status().is_success() {
@@ -171,6 +149,39 @@ async fn clear_done_tags(code: String, month: String) -> Result<(), JsError> {
         }
         let json: Value = response.json().await?;
         log(&format!("{}", serde_json::to_string_pretty(&json)?));
+
+        // total_posts is the number of posts, report it
+        let total_posts = json["response"]["total_posts"].as_i64()
+            .ok_or_else(|| JsError::new("could not get total_posts as an int"))?;
+        if total == 1 {
+            alert(&format!("Number of Done posts in {month}: {total_posts}"));
+        }
+        total = total_posts;
+
+        // iterate through each post and clear the tags
+        let posts = json["response"]["posts"].as_array().ok_or_else(|| JsError::new("failed to convert posts to array"))?;
+        for post in posts {
+            let new_json: Value = json!({
+                "content": post["content"],
+                "tags": ""
+            });
+            log(&format!("Post Body: {}", serde_json::to_string_pretty(&new_json)?));
+            let post_id = &post["id"];
+            let post_url = format!("https://api.tumblr.com/v2/blog/frankgojikanban/posts/{post_id}");
+            let response = client.put(&post_url)
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .header(CONTENT_TYPE, "application/json")
+                .body(serde_json::to_string(&new_json)?)
+                .send()
+                .await?;
+            if !response.status().is_success() {
+                let msg = format!("request failed, status: {:?}", response.status());
+                return Err(JsError::new(&msg));
+            }
+            let json: Value = response.json().await?;
+            log(&format!("{}", serde_json::to_string_pretty(&json)?));
+        }
+        total -= posts.len() as i64;
     }
 
     let window = web_sys::window().ok_or_else(|| JsError::new("no global `window` exists"))?;
