@@ -54,11 +54,13 @@ impl HandleRedirect {
     /// Handles redirect URL, parses state, calls appropriate handler
     /// Args: two JS callback functions:
     /// set_op: sets string for which operation this is
+    /// set_total: sets int for the total number of posts to clear
     /// set_clear_count: sets int for the number of posts cleared so far
     pub async fn handle_redirect
     (
         &self,
         set_op: &js_sys::Function,
+        set_total: &js_sys::Function,
         set_clear_count: &js_sys::Function,
     ) -> Result<(), JsError> {
         let window = web_sys::window().ok_or_else(|| JsError::new("no global `window` exists"))?;
@@ -97,7 +99,12 @@ impl HandleRedirect {
 
         match op {
             Op::Done => HandleRedirect::add_done_tag(code, value).await,
-            Op::Clear => HandleRedirect::clear_done_tags(code, value, set_clear_count).await,
+            Op::Clear => HandleRedirect::clear_done_tags(
+                code,
+                value,
+                set_total,
+                set_clear_count
+            ).await,
         }
     }
 
@@ -157,6 +164,7 @@ impl HandleRedirect {
     (
         code: String,
         month: String,
+        set_total: &js_sys::Function,
         set_clear_count: &js_sys::Function,
     ) -> Result<(), JsError> {
         let token = HandleRedirect::get_token(code).await?;
@@ -187,6 +195,8 @@ impl HandleRedirect {
             let total_posts = json["response"]["total_posts"].as_i64()
                 .ok_or_else(|| JsError::new("could not get total_posts as an int"))?;
             if total == 1 {
+                let this = JsValue::null();
+                let _ = set_total.call1(&this, &JsValue::from(total_posts));
                 alert(&format!("Number of Done posts in {month}: {total_posts}"));
             }
             total = total_posts;
