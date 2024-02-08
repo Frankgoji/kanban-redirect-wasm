@@ -196,7 +196,7 @@ impl HandleRedirect {
                 .ok_or_else(|| JsError::new("could not get total_posts as an int"))?;
             if total == 1 {
                 let this = JsValue::null();
-                let _ = set_total.call1(&this, &JsValue::from(total_posts));
+                let _ = set_total.call1(&this, &JsValue::from(total_posts as i32));
                 alert(&format!("Number of Done posts in {month}: {total_posts}"));
             }
             total = total_posts;
